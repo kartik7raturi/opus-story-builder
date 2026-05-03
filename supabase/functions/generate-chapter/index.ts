@@ -8,9 +8,6 @@ Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
   try {
-    const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
-    if (!LOVABLE_API_KEY) throw new Error("LOVABLE_API_KEY not configured");
-
     const { bookTitle, emotion, tone, audience, chapter, prevSummary, wordsTarget } = await req.json();
     if (!chapter?.title) {
       return new Response(JSON.stringify({ error: "chapter.title is required" }), {
@@ -20,7 +17,7 @@ Deno.serve(async (req) => {
 
     const target = Math.min(Math.max(Number(wordsTarget) || 1500, 600), 3500);
 
-    const system = `You are a bestselling author. You write rich, immersive eBook chapters with strong voice, sensory detail, concrete examples, and clear structure. Use proper paragraphs separated by blank lines. Use ## for section headings within the chapter when appropriate. Do NOT include the chapter number or chapter title heading at the top — the layout adds them. Do not include any meta commentary. Aim for ~${target} words.`;
+    const system = `You are a bestselling author. You write rich, immersive eBook chapters with strong voice, sensory detail, concrete examples, and clear structure. Use proper paragraphs separated by blank lines. Use ## for section headings within the chapter when appropriate. Do NOT include the chapter number or chapter title heading at the top — the layout adds them. Do not include any meta commentary. Aim for approximately ${target} words.`;
 
     const user = `Book: "${bookTitle}"
 Primary emotion: ${emotion || "inspiring"}
@@ -34,31 +31,26 @@ ${(chapter.key_points || []).map((p: string) => `- ${p}`).join("\n")}
 
 Write the full chapter now. Markdown allowed (## subheadings, *emphasis*, **bold**, > blockquotes, - bullet lists). End with a short, resonant closing paragraph.`;
 
-    const resp = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+    // Pollinations.ai - free open-source AI, no API key, unlimited
+    const resp = await fetch("https://text.pollinations.ai/openai", {
       method: "POST",
-      headers: {
-        Authorization: `Bearer ${LOVABLE_API_KEY}`,
-        "Content-Type": "application/json",
-      },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        model: "google/gemini-3.1-pro-preview",
+        model: "openai-large",
         messages: [
           { role: "system", content: system },
           { role: "user", content: user },
         ],
+        seed: Math.floor(Math.random() * 1000000),
       }),
     });
 
     if (!resp.ok) {
       const text = await resp.text();
-      if (resp.status === 429) {
-        return new Response(JSON.stringify({ error: "Rate limit reached. Slowing down — please retry." }), { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } });
-      }
-      if (resp.status === 402) {
-        return new Response(JSON.stringify({ error: "AI credits exhausted. Add credits in Settings → Workspace → Usage." }), { status: 402, headers: { ...corsHeaders, "Content-Type": "application/json" } });
-      }
-      console.error("AI chapter error", resp.status, text);
-      return new Response(JSON.stringify({ error: "AI gateway error" }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      console.error("Pollinations chapter error", resp.status, text);
+      return new Response(JSON.stringify({ error: `AI service error: ${resp.status}` }), {
+        status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
     }
 
     const data = await resp.json();

@@ -8,9 +8,6 @@ Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
   try {
-    const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
-    if (!LOVABLE_API_KEY) throw new Error("LOVABLE_API_KEY not configured");
-
     const { prompt, kind, emotion, quality } = await req.json();
     if (!prompt) {
       return new Response(JSON.stringify({ error: "prompt is required" }), {
@@ -20,47 +17,42 @@ Deno.serve(async (req) => {
 
     const moodLine = emotion ? `Emotional atmosphere: ${emotion}.` : "";
     const styling = kind === "cover"
-      ? `Stunning, cinematic eBook COVER ART. Portrait composition, rich depth, professional book-cover quality. Strong focal subject, dramatic lighting, evocative color palette, painterly textures. NO text, NO letters, NO logos, NO watermark anywhere in the image. ${moodLine}`
-      : `Editorial chapter illustration. Tasteful, atmospheric, painterly. NO text, NO letters, NO captions. Slightly desaturated cinematic palette that supports reading. ${moodLine}`;
+      ? `Stunning cinematic eBook cover art, portrait composition, rich depth, professional book-cover quality, dramatic lighting, evocative palette, painterly textures, no text, no letters, no logos, no watermark. ${moodLine}`
+      : `Editorial chapter illustration, tasteful, atmospheric, painterly, cinematic palette, no text, no letters, no captions. ${moodLine}`;
 
-    const finalPrompt = `${styling}\n\nSubject: ${prompt}`;
+    const finalPrompt = `${styling} Subject: ${prompt}`;
 
-    const model = quality === "pro"
-      ? "google/gemini-3-pro-image-preview"
-      : "google/gemini-2.5-flash-image";
+    // Pollinations.ai image generation - free, open-source (Flux model), no API key
+    const isCover = kind === "cover";
+    const width = isCover ? 768 : 1024;
+    const height = isCover ? 1152 : 768;
+    const model = quality === "pro" ? "flux" : "flux";
+    const seed = Math.floor(Math.random() * 1000000);
 
-    const resp = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${LOVABLE_API_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model,
-        messages: [{ role: "user", content: finalPrompt }],
-        modalities: ["image", "text"],
-      }),
-    });
+    const url = `https://image.pollinations.ai/prompt/${encodeURIComponent(finalPrompt)}?width=${width}&height=${height}&model=${model}&seed=${seed}&nologo=true&enhance=true`;
+
+    const resp = await fetch(url);
 
     if (!resp.ok) {
       const text = await resp.text();
-      if (resp.status === 429) {
-        return new Response(JSON.stringify({ error: "Rate limit reached." }), { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } });
-      }
-      if (resp.status === 402) {
-        return new Response(JSON.stringify({ error: "AI credits exhausted." }), { status: 402, headers: { ...corsHeaders, "Content-Type": "application/json" } });
-      }
-      console.error("AI image error", resp.status, text);
-      return new Response(JSON.stringify({ error: "AI image generation failed" }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      console.error("Pollinations image error", resp.status, text);
+      return new Response(JSON.stringify({ error: `Image service error: ${resp.status}` }), {
+        status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
     }
 
-    const data = await resp.json();
-    const imageUrl = data.choices?.[0]?.message?.images?.[0]?.image_url?.url;
-    if (!imageUrl) {
-      return new Response(JSON.stringify({ error: "No image returned" }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    const arrayBuffer = await resp.arrayBuffer();
+    const bytes = new Uint8Array(arrayBuffer);
+    // base64 encode
+    let binary = "";
+    const chunk = 0x8000;
+    for (let i = 0; i < bytes.length; i += chunk) {
+      binary += String.fromCharCode.apply(null, Array.from(bytes.subarray(i, i + chunk)) as any);
     }
+    const base64 = btoa(binary);
+    const dataUrl = `data:image/jpeg;base64,${base64}`;
 
-    return new Response(JSON.stringify({ image: imageUrl }), {
+    return new Response(JSON.stringify({ image: dataUrl }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (e) {
