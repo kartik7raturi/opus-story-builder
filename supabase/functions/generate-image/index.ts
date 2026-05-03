@@ -22,28 +22,58 @@ Deno.serve(async (req) => {
 
     const finalPrompt = `${styling} Subject: ${prompt}`;
 
-    // Pollinations.ai image generation - free, open-source (Flux model), no API key
+    // Free open-source HQ image generation via Pollinations (Flux/Turbo).
     const isCover = kind === "cover";
-    const width = isCover ? 768 : 1024;
-    const height = isCover ? 1152 : 768;
-    const model = quality === "pro" ? "flux" : "flux";
-    const seed = Math.floor(Math.random() * 1000000);
+    // Higher resolution for HQ output
+    const width = isCover ? 1024 : 1280;
+    const height = isCover ? 1536 : 896;
 
-    const url = `https://image.pollinations.ai/prompt/${encodeURIComponent(finalPrompt)}?width=${width}&height=${height}&model=${model}&seed=${seed}&nologo=true&enhance=true`;
+    // Try high-quality models first, then fall back to faster ones if they fail/timeout.
+    const models = quality === "pro"
+      ? ["flux", "flux-realism", "flux-anime", "turbo"]
+      : ["flux", "turbo"];
 
-    const resp = await fetch(url);
+    async function tryModel(model: string, timeoutMs: number) {
+      const seed = Math.floor(Math.random() * 1000000);
+      const url = `https://image.pollinations.ai/prompt/${encodeURIComponent(finalPrompt)}?width=${width}&height=${height}&model=${model}&seed=${seed}&nologo=true&enhance=true&private=true`;
+      const ctrl = new AbortController();
+      const t = setTimeout(() => ctrl.abort(), timeoutMs);
+      try {
+        return await fetch(url, { signal: ctrl.signal });
+      } finally {
+        clearTimeout(t);
+      }
+    }
 
-    if (!resp.ok) {
-      const text = await resp.text();
-      console.error("Pollinations image error", resp.status, text);
-      return new Response(JSON.stringify({ error: `Image service error: ${resp.status}` }), {
-        status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
+    let arrayBuffer: ArrayBuffer | null = null;
+    let lastErr = "";
+    for (let attempt = 0; attempt < models.length + 1; attempt++) {
+      const model = models[Math.min(attempt, models.length - 1)];
+      try {
+        const resp = await tryModel(model, 55000);
+        if (resp.ok) {
+          arrayBuffer = await resp.arrayBuffer();
+          if (arrayBuffer.byteLength > 1000) break;
+          lastErr = "empty image";
+        } else {
+          lastErr = `status ${resp.status}`;
+          await resp.text().catch(() => "");
+          console.warn(`image attempt ${attempt} model=${model} ${lastErr}`);
+        }
+      } catch (err) {
+        lastErr = err instanceof Error ? err.message : String(err);
+        console.warn(`image attempt ${attempt} model=${model} threw: ${lastErr}`);
+      }
+      await new Promise((r) => setTimeout(r, 1200 * (attempt + 1)));
+    }
+
+    if (!arrayBuffer) {
+      return new Response(JSON.stringify({ error: `Image service unavailable: ${lastErr}` }), {
+        status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
-    const arrayBuffer = await resp.arrayBuffer();
     const bytes = new Uint8Array(arrayBuffer);
-    // base64 encode
     let binary = "";
     const chunk = 0x8000;
     for (let i = 0; i < bytes.length; i += chunk) {
