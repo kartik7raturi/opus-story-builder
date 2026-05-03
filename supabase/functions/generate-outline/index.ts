@@ -4,6 +4,101 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
+const cleanJsonText = (value: string) => value.replace(/```json|```/g, "").trim();
+
+const extractBalancedJson = (value: string) => {
+  const cleaned = cleanJsonText(value);
+  const start = cleaned.indexOf("{");
+  if (start === -1) return cleaned;
+
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let i = start; i < cleaned.length; i++) {
+    const char = cleaned[i];
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (char === "\\") {
+      escaped = true;
+      continue;
+    }
+    if (char === '"') inString = !inString;
+    if (inString) continue;
+    if (char === "{") depth++;
+    if (char === "}") depth--;
+    if (depth === 0) return cleaned.slice(start, i + 1);
+  }
+
+  return cleaned.slice(start);
+};
+
+const parseOutlineJson = (content: string) => {
+  const candidates = [content, cleanJsonText(content), extractBalancedJson(content)];
+  for (const candidate of candidates) {
+    try {
+      return JSON.parse(candidate);
+    } catch {
+      // Try the next safer candidate before falling back.
+    }
+  }
+  return null;
+};
+
+const buildFallbackOutline = ({ title, emotion, audience, tone, tags, extra, numChapters }: {
+  title: string;
+  emotion?: string;
+  audience?: string;
+  tone?: string;
+  tags?: string;
+  extra?: string;
+  numChapters: number;
+}) => {
+  const mood = emotion || "inspiring";
+  const reader = audience || "general readers";
+  const tagList = (tags || "ebook, transformation, guide, story, creativity, growth")
+    .split(",")
+    .map((tag) => tag.trim())
+    .filter(Boolean)
+    .slice(0, 10);
+
+  const chapterThemes = [
+    "The First Spark",
+    "Understanding the World",
+    "The Hidden Challenge",
+    "A New Method",
+    "The Turning Point",
+    "Tools for the Journey",
+    "Stories of Change",
+    "The Deeper Lesson",
+    "Building the Future",
+    "The Final Transformation",
+  ];
+
+  return {
+    title: title.trim(),
+    subtitle: `A ${mood} ebook for ${reader}`,
+    author_pen_name: "Avery Quinn",
+    tagline: `A vivid, ${tone || "engaging"} journey through ${title}.`,
+    description: `This ebook explores ${title} with a ${mood} emotional direction, practical structure, and polished storytelling for ${reader}. It blends clear chapters, memorable examples, reflective moments, and useful takeaways so readers can move from curiosity to confidence. ${extra ? `It also includes these requested notes: ${extra}` : ""}`.trim(),
+    tags: tagList.length >= 6 ? tagList : [...tagList, "ebook", "guide", "learning", "inspiration"].slice(0, 10),
+    cover_prompt: `High-quality cinematic ebook cover artwork for ${title}, ${mood} mood, premium editorial composition, symbolic imagery, rich lighting, no text, no letters, no logo`,
+    chapters: Array.from({ length: numChapters }, (_, index) => ({
+      number: index + 1,
+      title: chapterThemes[index] || `Chapter ${index + 1}`,
+      summary: `A polished chapter that develops ${title} through a ${mood} lens, giving ${reader} a clear progression and meaningful insight.`,
+      key_points: [
+        "Open with a vivid scene or question",
+        "Explain the central idea clearly",
+        "Add practical examples and emotional depth",
+        "End with a strong transition to the next chapter",
+      ],
+      image_prompt: `Premium cinematic illustration for chapter ${index + 1} of ${title}, ${mood} atmosphere, editorial book art, detailed scene, no text, no typography`,
+    })),
+  };
+};
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
@@ -61,6 +156,8 @@ Generate exactly ${numChapters} chapters.`;
           { role: "user", content: user },
         ],
         response_format: { type: "json_object" },
+        max_tokens: 6000,
+        temperature: 0.7,
         seed: Math.floor(Math.random() * 1000000),
       }),
     });
@@ -75,13 +172,15 @@ Generate exactly ${numChapters} chapters.`;
 
     const data = await resp.json();
     const content = data.choices?.[0]?.message?.content ?? "{}";
-    let outline: any;
-    try { outline = JSON.parse(content); } catch {
-      const cleaned = content.replace(/```json|```/g, "").trim();
-      // try to extract JSON object
-      const match = cleaned.match(/\{[\s\S]*\}/);
-      outline = JSON.parse(match ? match[0] : cleaned);
-    }
+    const outline = parseOutlineJson(content) ?? buildFallbackOutline({
+      title,
+      emotion,
+      audience,
+      tone,
+      tags,
+      extra,
+      numChapters,
+    });
 
     return new Response(JSON.stringify({ outline }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
