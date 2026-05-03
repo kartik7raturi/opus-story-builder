@@ -145,42 +145,61 @@ Return ONLY this JSON shape, nothing else:
 }
 Generate exactly ${numChapters} chapters.`;
 
-    // Pollinations.ai - free, open-source, no API key, no limits
-    const resp = await fetch("https://text.pollinations.ai/openai", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model: "openai",
-        messages: [
-          { role: "system", content: system },
-          { role: "user", content: user },
-        ],
-        response_format: { type: "json_object" },
-        max_tokens: 6000,
-        temperature: 0.7,
-        seed: Math.floor(Math.random() * 1000000),
-      }),
-    });
-
-    if (!resp.ok) {
-      const text = await resp.text();
-      console.error("Pollinations outline error", resp.status, text);
-      return new Response(JSON.stringify({ error: `AI service error: ${resp.status}` }), {
-        status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+    // Pollinations.ai - free, open-source. Retry across models on 5xx/timeouts.
+    const models = ["openai", "openai-fast", "mistral"];
+    async function callPollinations(model: string, timeoutMs: number) {
+      const ctrl = new AbortController();
+      const t = setTimeout(() => ctrl.abort(), timeoutMs);
+      try {
+        return await fetch("https://text.pollinations.ai/openai", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            model,
+            messages: [
+              { role: "system", content: system },
+              { role: "user", content: user },
+            ],
+            response_format: { type: "json_object" },
+            max_tokens: 6000,
+            temperature: 0.7,
+            seed: Math.floor(Math.random() * 1000000),
+          }),
+          signal: ctrl.signal,
+        });
+      } finally {
+        clearTimeout(t);
+      }
     }
 
-    const data = await resp.json();
-    const content = data.choices?.[0]?.message?.content ?? "{}";
-    const outline = parseOutlineJson(content) ?? buildFallbackOutline({
-      title,
-      emotion,
-      audience,
-      tone,
-      tags,
-      extra,
-      numChapters,
+    let content = "{}";
+    let lastErr = "";
+    for (let attempt = 0; attempt < 4; attempt++) {
+      const model = models[Math.min(attempt, models.length - 1)];
+      try {
+        const resp = await callPollinations(model, 50000);
+        if (resp.ok) {
+          const data = await resp.json();
+          content = data.choices?.[0]?.message?.content ?? "{}";
+          if (content && content.trim().length > 50) break;
+          lastErr = "empty content";
+        } else {
+          lastErr = `status ${resp.status}`;
+          await resp.text().catch(() => "");
+          console.warn(`outline attempt ${attempt} model=${model} ${lastErr}`);
+        }
+      } catch (err) {
+        lastErr = err instanceof Error ? err.message : String(err);
+        console.warn(`outline attempt ${attempt} model=${model} threw: ${lastErr}`);
+      }
+      await new Promise((r) => setTimeout(r, 1500 * (attempt + 1)));
+    }
+
+    const parsed = parseOutlineJson(content);
+    const outline = parsed ?? buildFallbackOutline({
+      title, emotion, audience, tone, tags, extra, numChapters,
     });
+    if (!parsed) console.error("outline fallback used. lastErr=", lastErr);
 
     return new Response(JSON.stringify({ outline }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
