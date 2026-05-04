@@ -8,52 +8,43 @@ import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
 import { Sparkles, Wand2 } from "lucide-react";
 
+export type EbookType =
+  | "standard"
+  | "coloring"
+  | "game"
+  | "kids"
+  | "workbook"
+  | "cookbook"
+  | "journal"
+  | "comic"
+  | "self_help"
+  | "fiction"
+  | "biography"
+  | "technical";
+
 export type GeneratorFormValues = {
   title: string;
-  emotion: string;
-  tone: string;
-  audience: string;
+  ebookType: EbookType;
+  notes: string;
   chapters: number;
   wordsPerChapter: number;
-  tags: string;
-  extra: string;
   imagesPerChapter: boolean;
   hqImages: boolean;
 };
 
-const EMOTIONS = [
-  "Inspiring & uplifting",
-  "Calm & meditative",
-  "Romantic & tender",
-  "Mysterious & suspenseful",
-  "Dark & gothic",
-  "Joyful & playful",
-  "Melancholic & reflective",
-  "Adventurous & bold",
-  "Empowering & fierce",
-  "Whimsical & dreamy",
-  "Serious & academic",
-  "Humorous & witty",
-];
-
-const TONES = [
-  "Vivid & cinematic",
-  "Conversational & warm",
-  "Authoritative & expert",
-  "Poetic & literary",
-  "Practical & no-nonsense",
-  "Storytelling & narrative",
-];
-
-const AUDIENCES = [
-  "General readers",
-  "Young adults",
-  "Professionals",
-  "Entrepreneurs",
-  "Students",
-  "Children (8–12)",
-  "Spiritual seekers",
-  "Hobbyists & enthusiasts",
+const TYPES: { value: EbookType; label: string; hint: string }[] = [
+  { value: "standard",   label: "Standard eBook",   hint: "Classic narrative or informational book" },
+  { value: "self_help",  label: "Self-Help",        hint: "Transformation, frameworks, exercises" },
+  { value: "fiction",    label: "Fiction / Novel",  hint: "Story-driven with characters & arcs" },
+  { value: "biography",  label: "Biography",        hint: "Life-story narrative" },
+  { value: "technical",  label: "Technical Guide",  hint: "Step-by-step expert content" },
+  { value: "workbook",   label: "Workbook",         hint: "Heavy on tasks & reflection prompts" },
+  { value: "journal",    label: "Guided Journal",   hint: "Prompted writing pages" },
+  { value: "cookbook",   label: "Cookbook",         hint: "Recipes, ingredients, instructions" },
+  { value: "kids",       label: "Kids' Book",       hint: "Ages 4–10, illustrated, simple language" },
+  { value: "coloring",   label: "Coloring Book",    hint: "Line-art prompts on every page" },
+  { value: "game",       label: "Game Book",        hint: "Puzzles, choices, mini-games" },
+  { value: "comic",      label: "Comic / Graphic",  hint: "Panel-driven visual storytelling" },
 ];
 
 interface Props {
@@ -64,13 +55,10 @@ interface Props {
 export function GeneratorForm({ onSubmit, isGenerating }: Props) {
   const [v, setV] = useState<GeneratorFormValues>({
     title: "",
-    emotion: EMOTIONS[0],
-    tone: TONES[0],
-    audience: AUDIENCES[0],
+    ebookType: "standard",
+    notes: "",
     chapters: 9,
     wordsPerChapter: 1500,
-    tags: "",
-    extra: "",
     imagesPerChapter: true,
     hqImages: false,
   });
@@ -96,30 +84,26 @@ export function GeneratorForm({ onSubmit, isGenerating }: Props) {
           onChange={(e) => set("title", e.target.value)}
           className="h-14 text-lg font-display border-2 focus-visible:ring-primary"
         />
+        <p className="text-xs text-muted-foreground">
+          AI will auto-design the characters, emotion, tone, audience, tags & direction from your title.
+        </p>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-3">
-        <div className="space-y-2">
-          <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Emotion</Label>
-          <Select value={v.emotion} onValueChange={(x) => set("emotion", x)}>
-            <SelectTrigger className="h-11"><SelectValue /></SelectTrigger>
-            <SelectContent>{EMOTIONS.map((e) => <SelectItem key={e} value={e}>{e}</SelectItem>)}</SelectContent>
-          </Select>
-        </div>
-        <div className="space-y-2">
-          <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Tone</Label>
-          <Select value={v.tone} onValueChange={(x) => set("tone", x)}>
-            <SelectTrigger className="h-11"><SelectValue /></SelectTrigger>
-            <SelectContent>{TONES.map((e) => <SelectItem key={e} value={e}>{e}</SelectItem>)}</SelectContent>
-          </Select>
-        </div>
-        <div className="space-y-2">
-          <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Audience</Label>
-          <Select value={v.audience} onValueChange={(x) => set("audience", x)}>
-            <SelectTrigger className="h-11"><SelectValue /></SelectTrigger>
-            <SelectContent>{AUDIENCES.map((e) => <SelectItem key={e} value={e}>{e}</SelectItem>)}</SelectContent>
-          </Select>
-        </div>
+      <div className="space-y-2">
+        <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">eBook Type</Label>
+        <Select value={v.ebookType} onValueChange={(x) => set("ebookType", x as EbookType)}>
+          <SelectTrigger className="h-12"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            {TYPES.map((t) => (
+              <SelectItem key={t.value} value={t.value}>
+                <div className="flex flex-col">
+                  <span className="font-medium">{t.label}</span>
+                  <span className="text-xs text-muted-foreground">{t.hint}</span>
+                </div>
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
       </div>
 
       <div className="grid gap-6 md:grid-cols-2">
@@ -129,7 +113,6 @@ export function GeneratorForm({ onSubmit, isGenerating }: Props) {
             <span className="font-display text-2xl text-primary">{v.chapters}</span>
           </div>
           <Slider min={3} max={20} step={1} value={[v.chapters]} onValueChange={([n]) => set("chapters", n)} />
-          <p className="text-xs text-muted-foreground">More chapters = longer book, more time.</p>
         </div>
         <div className="space-y-3 rounded-md border bg-card p-4">
           <div className="flex items-center justify-between">
@@ -137,28 +120,20 @@ export function GeneratorForm({ onSubmit, isGenerating }: Props) {
             <span className="font-display text-2xl text-primary">~{v.wordsPerChapter}</span>
           </div>
           <Slider min={600} max={3000} step={100} value={[v.wordsPerChapter]} onValueChange={([n]) => set("wordsPerChapter", n)} />
-          <p className="text-xs text-muted-foreground">Approx total: ~{(v.chapters * v.wordsPerChapter).toLocaleString()} words.</p>
+          <p className="text-xs text-muted-foreground">~{(v.chapters * v.wordsPerChapter).toLocaleString()} words total.</p>
         </div>
       </div>
 
       <div className="space-y-2">
-        <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Tags / Keywords (optional)</Label>
-        <Input
-          placeholder="self-help, mindfulness, focus, productivity"
-          value={v.tags}
-          maxLength={200}
-          onChange={(e) => set("tags", e.target.value)}
-        />
-      </div>
-
-      <div className="space-y-2">
-        <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Extra direction (optional)</Label>
+        <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+          Additional info (optional)
+        </Label>
         <Textarea
-          placeholder="Anything specific you want covered, characters to include, angle to take, things to avoid…"
-          value={v.extra}
+          placeholder="Anything specific: characters, angle, themes to include or avoid, audience hints…"
+          value={v.notes}
           rows={3}
           maxLength={1000}
-          onChange={(e) => set("extra", e.target.value)}
+          onChange={(e) => set("notes", e.target.value)}
         />
       </div>
 
@@ -166,14 +141,14 @@ export function GeneratorForm({ onSubmit, isGenerating }: Props) {
         <label className="flex items-center justify-between rounded-md border bg-card p-4 cursor-pointer">
           <div>
             <div className="font-semibold">Illustration per chapter</div>
-            <div className="text-xs text-muted-foreground">Adds an evocative image to each chapter opener.</div>
+            <div className="text-xs text-muted-foreground">An evocative AI image per chapter opener.</div>
           </div>
           <Switch checked={v.imagesPerChapter} onCheckedChange={(c) => set("imagesPerChapter", c)} />
         </label>
         <label className="flex items-center justify-between rounded-md border bg-card p-4 cursor-pointer">
           <div>
             <div className="font-semibold flex items-center gap-2">HQ image model <Sparkles className="h-3.5 w-3.5 text-accent" /></div>
-            <div className="text-xs text-muted-foreground">Slower & richer (Nano Banana Pro). Off = fast.</div>
+            <div className="text-xs text-muted-foreground">Slower, richer (free open-source Flux). Off = fast.</div>
           </div>
           <Switch checked={v.hqImages} onCheckedChange={(c) => set("hqImages", c)} />
         </label>
@@ -186,7 +161,7 @@ export function GeneratorForm({ onSubmit, isGenerating }: Props) {
         className="w-full h-14 text-base font-semibold bg-ink text-primary-foreground hover:opacity-95 shadow-book"
       >
         <Wand2 className="mr-2 h-5 w-5" />
-        {isGenerating ? "Crafting your eBook…" : "Generate eBook"}
+        {isGenerating ? "Crafting your eBook…" : "Generate eBook (.docx)"}
       </Button>
     </form>
   );

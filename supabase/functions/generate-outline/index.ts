@@ -10,91 +10,66 @@ const extractBalancedJson = (value: string) => {
   const cleaned = cleanJsonText(value);
   const start = cleaned.indexOf("{");
   if (start === -1) return cleaned;
-
-  let depth = 0;
-  let inString = false;
-  let escaped = false;
+  let depth = 0, inString = false, escaped = false;
   for (let i = start; i < cleaned.length; i++) {
     const char = cleaned[i];
-    if (escaped) {
-      escaped = false;
-      continue;
-    }
-    if (char === "\\") {
-      escaped = true;
-      continue;
-    }
+    if (escaped) { escaped = false; continue; }
+    if (char === "\\") { escaped = true; continue; }
     if (char === '"') inString = !inString;
     if (inString) continue;
     if (char === "{") depth++;
     if (char === "}") depth--;
     if (depth === 0) return cleaned.slice(start, i + 1);
   }
-
   return cleaned.slice(start);
 };
 
 const parseOutlineJson = (content: string) => {
   const candidates = [content, cleanJsonText(content), extractBalancedJson(content)];
-  for (const candidate of candidates) {
-    try {
-      return JSON.parse(candidate);
-    } catch {
-      // Try the next safer candidate before falling back.
-    }
+  for (const c of candidates) {
+    try { return JSON.parse(c); } catch { /* try next */ }
   }
   return null;
 };
 
-const buildFallbackOutline = ({ title, emotion, audience, tone, tags, extra, numChapters }: {
-  title: string;
-  emotion?: string;
-  audience?: string;
-  tone?: string;
-  tags?: string;
-  extra?: string;
-  numChapters: number;
-}) => {
-  const mood = emotion || "inspiring";
-  const reader = audience || "general readers";
-  const tagList = (tags || "ebook, transformation, guide, story, creativity, growth")
-    .split(",")
-    .map((tag) => tag.trim())
-    .filter(Boolean)
-    .slice(0, 10);
+const TYPE_GUIDANCE: Record<string, string> = {
+  standard:   "A premium general-interest book. Balanced narrative + insight.",
+  self_help:  "Transformation framework. Clear models, exercises, breakthroughs.",
+  fiction:    "Story-driven novel. Characters, arcs, conflict, sensory scenes.",
+  biography:  "Life-narrative arc. Real-feeling scenes, voice, turning points.",
+  technical:  "Expert step-by-step guide. Code-like clarity, deep examples.",
+  workbook:   "Action-heavy. Each chapter loaded with exercises and reflection.",
+  journal:    "Guided journal. Prompts and white-space for writing.",
+  cookbook:   "Recipes. Ingredients, steps, plating notes, variations per chapter.",
+  kids:       "For ages 4–10. Simple language, big imagery, gentle lessons.",
+  coloring:   "Coloring book. Each chapter is a themed line-art scene + caption.",
+  game:       "Game book. Puzzles, choose-paths, mini-challenges per chapter.",
+  comic:      "Comic / graphic. Panel-by-panel visual storytelling.",
+};
 
-  const chapterThemes = [
-    "The First Spark",
-    "Understanding the World",
-    "The Hidden Challenge",
-    "A New Method",
-    "The Turning Point",
-    "Tools for the Journey",
-    "Stories of Change",
-    "The Deeper Lesson",
-    "Building the Future",
-    "The Final Transformation",
-  ];
-
+const buildFallbackOutline = ({ title, ebookType, notes, numChapters }: any) => {
+  const type = ebookType || "standard";
+  const themes = ["The First Spark","Understanding the World","The Hidden Challenge","A New Method",
+    "The Turning Point","Tools for the Journey","Stories of Change","The Deeper Lesson",
+    "Building the Future","The Final Transformation"];
   return {
-    title: title.trim(),
-    subtitle: `A ${mood} ebook for ${reader}`,
+    title: String(title).trim(),
+    subtitle: `A premium ${type.replace("_"," ")} ebook`,
     author_pen_name: "Avery Quinn",
-    tagline: `A vivid, ${tone || "engaging"} journey through ${title}.`,
-    description: `This ebook explores ${title} with a ${mood} emotional direction, practical structure, and polished storytelling for ${reader}. It blends clear chapters, memorable examples, reflective moments, and useful takeaways so readers can move from curiosity to confidence. ${extra ? `It also includes these requested notes: ${extra}` : ""}`.trim(),
-    tags: tagList.length >= 6 ? tagList : [...tagList, "ebook", "guide", "learning", "inspiration"].slice(0, 10),
-    cover_prompt: `High-quality cinematic ebook cover artwork for ${title}, ${mood} mood, premium editorial composition, symbolic imagery, rich lighting, no text, no letters, no logo`,
-    chapters: Array.from({ length: numChapters }, (_, index) => ({
-      number: index + 1,
-      title: chapterThemes[index] || `Chapter ${index + 1}`,
-      summary: `A polished chapter that develops ${title} through a ${mood} lens, giving ${reader} a clear progression and meaningful insight.`,
-      key_points: [
-        "Open with a vivid scene or question",
-        "Explain the central idea clearly",
-        "Add practical examples and emotional depth",
-        "End with a strong transition to the next chapter",
-      ],
-      image_prompt: `Premium cinematic illustration for chapter ${index + 1} of ${title}, ${mood} atmosphere, editorial book art, detailed scene, no text, no typography`,
+    tagline: `A vivid journey through ${title}.`,
+    description: `This ebook explores ${title} with structure, voice, and visual richness. ${notes || ""}`.trim(),
+    emotion: "inspiring & cinematic",
+    tone: "Hemingway-clean, vivid",
+    audience: "general readers",
+    characters: ["Narrator (warm, observant)", "Protagonist seeking change"],
+    tags: ["ebook","guide","transformation","story","insight","growth"],
+    cover_prompt: `Cinematic premium ebook cover for ${title}, dramatic lighting, symbolic imagery, no text`,
+    chapters: Array.from({ length: numChapters }, (_, i) => ({
+      number: i + 1,
+      title: themes[i] || `Chapter ${i + 1}`,
+      summary: `A polished chapter developing ${title}.`,
+      key_points: ["Hook scene","Central idea","Examples & emotion","Strong transition"],
+      image_prompt: `Cinematic illustration for chapter ${i + 1} of ${title}, no text`,
     })),
   };
 };
@@ -103,51 +78,55 @@ Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
   try {
-    const { title, emotion, audience, tone, chapters, tags, extra } = await req.json();
+    const { title, ebookType = "standard", notes = "", chapters } = await req.json();
     if (!title) {
       return new Response(JSON.stringify({ error: "title is required" }), {
         status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
-
     const numChapters = Math.min(Math.max(Number(chapters) || 9, 3), 20);
+    const guidance = TYPE_GUIDANCE[ebookType] || TYPE_GUIDANCE.standard;
 
-    const system = `You are an award-winning book editor. Output STRICT JSON only — no prose, no markdown fences, no commentary. Just the JSON object.`;
+    const system = `You are an elite ebook architect and storyteller. Your mission is to design professional, visually stunning, deeply engaging Amazon-KDP-quality ebooks. You combine compelling narrative arcs with emotional resonance, rich visual descriptions for AI image generation, data-driven charts, actionable exercises, and expert knowledge structured for maximum retention. Be specific, vivid, purposeful — never generic.
 
-    const user = `Design a complete eBook outline.
+You auto-derive: characters, emotion, tone, audience, tags, and creative direction from minimal user input. Output STRICT JSON only — no prose, no markdown fences.`;
 
-Title: "${title}"
-Primary emotion / mood: ${emotion || "inspiring"}
-Tone: ${tone || "engaging, vivid, modern"}
-Target audience: ${audience || "general readers"}
-Number of chapters: ${numChapters}
-Suggested tags: ${tags || "(propose 6 strong ones)"}
-Extra notes: ${extra || "(none)"}
+    const user = `Design a complete, premium ebook outline.
 
-Return ONLY this JSON shape, nothing else:
+TITLE: "${title}"
+EBOOK TYPE: ${ebookType} — ${guidance}
+USER NOTES: ${notes || "(none — invent the best direction yourself)"}
+CHAPTERS: ${numChapters}
+
+You MUST infer the emotional palette, tone, target audience, tags, and characters from the title + type. Make bold, specific choices.
+
+Return ONLY this JSON shape:
 {
-  "title": "refined polished title",
+  "title": "polished refined title",
   "subtitle": "compelling subtitle",
   "author_pen_name": "tasteful pen name",
   "tagline": "single-sentence hook",
   "description": "120-180 word back-cover blurb",
-  "tags": ["6-10 tags"],
-  "cover_prompt": "detailed art-direction prompt for cover image (no text on cover, evocative, cinematic)",
+  "emotion": "primary emotional palette (e.g. 'hopeful and quietly defiant')",
+  "tone": "writing tone (e.g. 'Hemingway-clean, cinematic, intimate')",
+  "audience": "specific audience persona",
+  "characters": ["3-5 named characters or archetypes with one-line traits"],
+  "tags": ["6-10 strong KDP tags"],
+  "cover_prompt": "detailed cinematic cover art-direction (NO text on cover)",
   "chapters": [
     {
       "number": 1,
-      "title": "chapter title",
+      "title": "evocative chapter title",
       "summary": "2-3 sentence summary",
-      "key_points": ["4-6 bullet points"],
-      "image_prompt": "detailed visual prompt (no text in image)"
+      "key_points": ["4-6 key points to cover"],
+      "image_prompt": "detailed visual prompt for chapter art (NO text in image)"
     }
   ]
 }
-Generate exactly ${numChapters} chapters.`;
+Generate exactly ${numChapters} chapters with strong narrative progression.`;
 
-    // Pollinations.ai - free, open-source. Retry across models on 5xx/timeouts.
     const models = ["openai", "openai-fast", "mistral"];
-    async function callPollinations(model: string, timeoutMs: number) {
+    async function call(model: string, timeoutMs: number) {
       const ctrl = new AbortController();
       const t = setTimeout(() => ctrl.abort(), timeoutMs);
       try {
@@ -156,20 +135,15 @@ Generate exactly ${numChapters} chapters.`;
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             model,
-            messages: [
-              { role: "system", content: system },
-              { role: "user", content: user },
-            ],
+            messages: [{ role: "system", content: system }, { role: "user", content: user }],
             response_format: { type: "json_object" },
             max_tokens: 6000,
-            temperature: 0.7,
+            temperature: 0.8,
             seed: Math.floor(Math.random() * 1000000),
           }),
           signal: ctrl.signal,
         });
-      } finally {
-        clearTimeout(t);
-      }
+      } finally { clearTimeout(t); }
     }
 
     let content = "{}";
@@ -177,7 +151,7 @@ Generate exactly ${numChapters} chapters.`;
     for (let attempt = 0; attempt < 4; attempt++) {
       const model = models[Math.min(attempt, models.length - 1)];
       try {
-        const resp = await callPollinations(model, 50000);
+        const resp = await call(model, 50000);
         if (resp.ok) {
           const data = await resp.json();
           content = data.choices?.[0]?.message?.content ?? "{}";
@@ -186,19 +160,15 @@ Generate exactly ${numChapters} chapters.`;
         } else {
           lastErr = `status ${resp.status}`;
           await resp.text().catch(() => "");
-          console.warn(`outline attempt ${attempt} model=${model} ${lastErr}`);
         }
       } catch (err) {
         lastErr = err instanceof Error ? err.message : String(err);
-        console.warn(`outline attempt ${attempt} model=${model} threw: ${lastErr}`);
       }
       await new Promise((r) => setTimeout(r, 1500 * (attempt + 1)));
     }
 
     const parsed = parseOutlineJson(content);
-    const outline = parsed ?? buildFallbackOutline({
-      title, emotion, audience, tone, tags, extra, numChapters,
-    });
+    const outline = parsed ?? buildFallbackOutline({ title, ebookType, notes, numChapters });
     if (!parsed) console.error("outline fallback used. lastErr=", lastErr);
 
     return new Response(JSON.stringify({ outline }), {
