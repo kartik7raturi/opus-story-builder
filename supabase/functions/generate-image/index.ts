@@ -8,7 +8,7 @@ Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
   try {
-    const { prompt, kind, emotion, quality } = await req.json();
+    const { prompt, kind, emotion, quality, style } = await req.json();
     if (!prompt) {
       return new Response(JSON.stringify({ error: "prompt is required" }), {
         status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -16,9 +16,12 @@ Deno.serve(async (req) => {
     }
 
     const moodLine = emotion ? `Emotional atmosphere: ${emotion}.` : "";
-    const styling = kind === "cover"
-      ? `Stunning cinematic eBook cover art, portrait composition, rich depth, professional book-cover quality, dramatic lighting, evocative palette, painterly textures, no text, no letters, no logos, no watermark. ${moodLine}`
-      : `Editorial chapter illustration, tasteful, atmospheric, painterly, cinematic palette, no text, no letters, no captions. ${moodLine}`;
+    const isLineArt = style === "line-art";
+    const styling = isLineArt
+      ? `Coloring book line art. Pure black outlines on solid white background, no shading, no fill, no color, clean continuous strokes, printable, kid-friendly, no text, no letters.`
+      : kind === "cover"
+        ? `Stunning cinematic eBook cover art, portrait composition, rich depth, professional book-cover quality, dramatic lighting, evocative palette, painterly textures, no text, no letters, no logos, no watermark. ${moodLine}`
+        : `Editorial chapter illustration, tasteful, atmospheric, painterly, cinematic palette, no text, no letters, no captions. ${moodLine}`;
 
     const finalPrompt = `${styling} Subject: ${prompt}`;
 
