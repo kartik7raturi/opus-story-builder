@@ -6,27 +6,23 @@ import type { Outline } from "@/lib/ebook-api";
 interface Props {
   outline: Outline;
   cover: string;
-  pdfBlob: Blob | null;
-  onDownloadPdf: () => void;
+  docxBlob: Blob | null;
+  onDownloadDocx: () => void;
   onDownloadCover: () => void;
   onReset: () => void;
 }
 
-export function ResultView({ outline, cover, pdfBlob, onDownloadPdf, onDownloadCover, onReset }: Props) {
+export function ResultView({ outline, cover, docxBlob, onDownloadDocx, onDownloadCover, onReset }: Props) {
   return (
     <div className="grid gap-10 lg:grid-cols-[360px_1fr]">
       <div className="space-y-4">
         <div className="relative animate-float-slow">
-          <img
-            src={cover}
-            alt={`${outline.title} cover`}
-            className="w-full rounded-sm shadow-book"
-          />
+          <img src={cover} alt={`${outline.title} cover`} className="w-full rounded-sm shadow-book" />
           <div className="absolute inset-0 rounded-sm ring-1 ring-black/10 pointer-events-none" />
         </div>
         <div className="space-y-2">
-          <Button onClick={onDownloadPdf} disabled={!pdfBlob} size="lg" className="w-full bg-ink text-primary-foreground hover:opacity-95">
-            <Download className="mr-2 h-4 w-4" /> Download eBook PDF
+          <Button onClick={onDownloadDocx} disabled={!docxBlob} size="lg" className="w-full bg-ink text-primary-foreground hover:opacity-95">
+            <Download className="mr-2 h-4 w-4" /> Download eBook (.docx)
           </Button>
           <Button onClick={onDownloadCover} variant="outline" size="lg" className="w-full">
             <ImageIcon className="mr-2 h-4 w-4" /> Download Cover Image

@@ -5,7 +5,7 @@ import { GeneratorForm, type GeneratorFormValues } from "@/components/GeneratorF
 import { ProgressTimeline, type Step } from "@/components/ProgressTimeline";
 import { ResultView } from "@/components/ResultView";
 import { generateOutline, generateChapter, generateImage, type Outline } from "@/lib/ebook-api";
-import { buildEbookPdf, downloadBlob, downloadDataUrl, type BuiltChapter } from "@/lib/pdf-builder";
+import { buildEbookDocx, downloadBlob, downloadDataUrl, type BuiltChapter } from "@/lib/docx-builder";
 
 type Phase = "idle" | "generating" | "done" | "error";
 
@@ -14,8 +14,8 @@ const Index = () => {
   const [steps, setSteps] = useState<Step[]>([]);
   const [outline, setOutline] = useState<Outline | null>(null);
   const [cover, setCover] = useState<string>("");
-  const [pdfBlob, setPdfBlob] = useState<Blob | null>(null);
-  const [pdfFilename, setPdfFilename] = useState("ebook.pdf");
+  const [docxBlob, setDocxBlob] = useState<Blob | null>(null);
+  const [docxFilename, setDocxFilename] = useState("ebook.docx");
 
   useEffect(() => {
     document.title = "Inkwell — AI eBook Generator";
@@ -35,66 +35,61 @@ const Index = () => {
     setPhase("generating");
     setOutline(null);
     setCover("");
-    setPdfBlob(null);
+    setDocxBlob(null);
 
     const initial: Step[] = [
-      { id: "outline", label: "Designing the book outline", status: "active", detail: "Title, chapters, themes, tags" },
+      { id: "outline", label: "Designing the book outline", status: "active", detail: "AI auto-deriving characters, emotion, tone, tags…" },
       { id: "cover", label: "Painting the cover", status: "pending" },
       ...Array.from({ length: v.chapters }, (_, i) => ({
         id: `ch-${i + 1}`, label: `Writing chapter ${i + 1}`, status: "pending" as const,
       })),
-      { id: "pdf", label: "Typesetting the PDF", status: "pending" },
+      { id: "docx", label: "Composing the .docx file", status: "pending" },
     ];
     setSteps(initial);
 
+    const isColoring = v.ebookType === "coloring";
+
     try {
-      // 1) Outline
       const out = await generateOutline({
         title: v.title,
-        emotion: v.emotion,
-        tone: v.tone,
-        audience: v.audience,
+        ebookType: v.ebookType,
+        notes: v.notes,
         chapters: v.chapters,
-        tags: v.tags,
-        extra: v.extra,
       });
       setOutline(out);
-      updateStep("outline", { status: "done", detail: `${out.chapters.length} chapters · ${out.tags?.length || 0} tags` });
+      updateStep("outline", { status: "done", detail: `${out.chapters.length} chapters · ${out.tags?.length || 0} tags · ${out.emotion || ""}` });
 
-      // Rebuild step list to match returned chapter count
       setSteps((prev) => {
         const fixed = prev.filter((s) => !s.id.startsWith("ch-"));
-        const before = fixed.findIndex((s) => s.id === "pdf");
+        const before = fixed.findIndex((s) => s.id === "docx");
         const chSteps = out.chapters.map((c) => ({
           id: `ch-${c.number}`, label: `Writing Ch. ${c.number}: ${c.title}`, status: "pending" as const,
         }));
         return [...fixed.slice(0, before), ...chSteps, ...fixed.slice(before)];
       });
 
-      // 2) Cover
-      updateStep("cover", { status: "active", detail: v.hqImages ? "HQ model · this can take ~60s" : "Fast model" });
+      updateStep("cover", { status: "active", detail: v.hqImages ? "HQ Flux model · ~60s" : "Fast model" });
       const coverImg = await generateImage({
         prompt: out.cover_prompt,
         kind: "cover",
-        emotion: v.emotion,
+        emotion: out.emotion,
         quality: v.hqImages ? "pro" : "fast",
       });
       setCover(coverImg);
       updateStep("cover", { status: "done" });
 
-      // 3) Chapters (sequential to keep momentum & avoid rate spikes)
       const builtChapters: BuiltChapter[] = [];
       let prevSummary = "";
       for (const chapter of out.chapters) {
         updateStep(`ch-${chapter.number}`, { status: "active" });
-
-        // Run text + image in parallel for this chapter
         const tasks: Promise<any>[] = [
           generateChapter({
             bookTitle: out.title,
-            emotion: v.emotion,
-            tone: v.tone,
-            audience: v.audience,
+            ebookType: v.ebookType,
+            emotion: out.emotion,
+            tone: out.tone,
+            audience: out.audience,
+            characters: out.characters,
             chapter,
             prevSummary,
             wordsTarget: v.wordsPerChapter,
@@ -104,12 +99,10 @@ const Index = () => {
           tasks.push(generateImage({
             prompt: chapter.image_prompt,
             kind: "chapter",
-            emotion: v.emotion,
+            emotion: out.emotion,
             quality: v.hqImages ? "pro" : "fast",
-          }).catch((err) => {
-            console.warn("Chapter image failed", err);
-            return undefined;
-          }));
+            style: isColoring ? "line-art" : "color",
+          }).catch((err) => { console.warn("Chapter image failed", err); return undefined; }));
         }
         const [content, image] = await Promise.all(tasks);
         builtChapters.push({
@@ -121,13 +114,12 @@ const Index = () => {
         updateStep(`ch-${chapter.number}`, { status: "done", detail: `${(content as string).split(/\s+/).length.toLocaleString()} words` });
       }
 
-      // 4) PDF
-      updateStep("pdf", { status: "active", detail: "Composing pages, cover, TOC, policies…" });
-      const blob = await buildEbookPdf({ outline: out, cover: coverImg, chapters: builtChapters });
+      updateStep("docx", { status: "active", detail: "Typesetting cover, TOC, chapters…" });
+      const blob = await buildEbookDocx({ outline: out, cover: coverImg, chapters: builtChapters });
       const safeName = out.title.replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "").toLowerCase() || "ebook";
-      setPdfBlob(blob);
-      setPdfFilename(`${safeName}.pdf`);
-      updateStep("pdf", { status: "done", detail: `${(blob.size / 1024).toFixed(0)} KB` });
+      setDocxBlob(blob);
+      setDocxFilename(`${safeName}.docx`);
+      updateStep("docx", { status: "done", detail: `${(blob.size / 1024).toFixed(0)} KB` });
       setPhase("done");
       toast.success("Your eBook is ready!");
     } catch (err: any) {
@@ -143,7 +135,7 @@ const Index = () => {
     setPhase("idle");
     setOutline(null);
     setCover("");
-    setPdfBlob(null);
+    setDocxBlob(null);
     setSteps([]);
   };
 
@@ -242,9 +234,9 @@ const Index = () => {
             <ResultView
               outline={outline}
               cover={cover}
-              pdfBlob={pdfBlob}
-              onDownloadPdf={() => pdfBlob && downloadBlob(pdfBlob, pdfFilename)}
-              onDownloadCover={() => downloadDataUrl(cover, pdfFilename.replace(/\.pdf$/, "-cover.png"))}
+              docxBlob={docxBlob}
+              onDownloadDocx={() => docxBlob && downloadBlob(docxBlob, docxFilename)}
+              onDownloadCover={() => downloadDataUrl(cover, docxFilename.replace(/\.docx$/, "-cover.png"))}
               onReset={reset}
             />
           ) : null}

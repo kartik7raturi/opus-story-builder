@@ -14,6 +14,10 @@ export type Outline = {
   author_pen_name: string;
   tagline: string;
   description: string;
+  emotion?: string;
+  tone?: string;
+  audience?: string;
+  characters?: string[];
   tags: string[];
   cover_prompt: string;
   chapters: ChapterPlan[];
@@ -21,18 +25,14 @@ export type Outline = {
 
 export type GenerateOptions = {
   title: string;
-  emotion: string;
-  audience?: string;
-  tone?: string;
+  ebookType: string;
+  notes?: string;
   chapters?: number;
-  tags?: string;
-  extra?: string;
 };
 
 async function invoke<T>(fn: string, body: unknown): Promise<T> {
   const { data, error } = await supabase.functions.invoke(fn, { body });
   if (error) {
-    // Try to surface server-side message
     const msg = (error as any)?.context?.responseText || error.message || "Request failed";
     throw new Error(msg);
   }
@@ -48,9 +48,11 @@ export async function generateOutline(opts: GenerateOptions): Promise<Outline> {
 
 export async function generateChapter(args: {
   bookTitle: string;
-  emotion: string;
+  ebookType: string;
+  emotion?: string;
   tone?: string;
   audience?: string;
+  characters?: string[];
   chapter: ChapterPlan;
   prevSummary?: string;
   wordsTarget?: number;
@@ -64,6 +66,7 @@ export async function generateImage(args: {
   kind: "cover" | "chapter";
   emotion?: string;
   quality?: "fast" | "pro";
+  style?: "color" | "line-art";
 }): Promise<string> {
   const { image } = await invoke<{ image: string }>("generate-image", args);
   return image;
