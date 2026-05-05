@@ -74,6 +74,46 @@ const buildFallbackOutline = ({ title, ebookType, notes, numChapters }: any) => 
   };
 };
 
+const normalizeOutline = (parsed: any, fallback: any, numChapters: number) => {
+  const candidate = parsed?.outline && typeof parsed.outline === "object" ? parsed.outline : parsed;
+  const chapters = Array.isArray(candidate?.chapters) ? candidate.chapters : [];
+  const usableChapters = chapters
+    .map((chapter: any, index: number) => ({
+      number: Number(chapter?.number) || index + 1,
+      title: String(chapter?.title || fallback.chapters[index]?.title || `Chapter ${index + 1}`).trim(),
+      summary: String(chapter?.summary || fallback.chapters[index]?.summary || fallback.description).trim(),
+      key_points: Array.isArray(chapter?.key_points) && chapter.key_points.length
+        ? chapter.key_points.map((point: any) => String(point)).filter(Boolean).slice(0, 6)
+        : fallback.chapters[index]?.key_points || ["Opening hook", "Core lesson", "Practical example", "Reader takeaway"],
+      image_prompt: String(chapter?.image_prompt || fallback.chapters[index]?.image_prompt || `Editorial illustration for ${fallback.title}`).trim(),
+    }))
+    .filter((chapter: any) => chapter.title && chapter.summary)
+    .slice(0, numChapters);
+
+  if (!candidate || typeof candidate !== "object" || usableChapters.length === 0) return fallback;
+
+  const completedChapters = usableChapters.length >= numChapters
+    ? usableChapters
+    : [...usableChapters, ...fallback.chapters.slice(usableChapters.length, numChapters)];
+
+  return {
+    ...fallback,
+    ...candidate,
+    title: String(candidate.title || fallback.title).trim(),
+    subtitle: String(candidate.subtitle || fallback.subtitle).trim(),
+    author_pen_name: String(candidate.author_pen_name || fallback.author_pen_name).trim(),
+    tagline: String(candidate.tagline || fallback.tagline).trim(),
+    description: String(candidate.description || fallback.description).trim(),
+    emotion: String(candidate.emotion || fallback.emotion).trim(),
+    tone: String(candidate.tone || fallback.tone).trim(),
+    audience: String(candidate.audience || fallback.audience).trim(),
+    characters: Array.isArray(candidate.characters) && candidate.characters.length ? candidate.characters.map(String).slice(0, 5) : fallback.characters,
+    tags: Array.isArray(candidate.tags) && candidate.tags.length ? candidate.tags.map(String).slice(0, 10) : fallback.tags,
+    cover_prompt: String(candidate.cover_prompt || fallback.cover_prompt).trim(),
+    chapters: completedChapters.map((chapter: any, index: number) => ({ ...chapter, number: index + 1 })),
+  };
+};
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
@@ -168,8 +208,9 @@ Generate exactly ${numChapters} chapters with strong narrative progression.`;
     }
 
     const parsed = parseOutlineJson(content);
-    const outline = parsed ?? buildFallbackOutline({ title, ebookType, notes, numChapters });
-    if (!parsed) console.error("outline fallback used. lastErr=", lastErr);
+    const fallback = buildFallbackOutline({ title, ebookType, notes, numChapters });
+    const outline = normalizeOutline(parsed, fallback, numChapters);
+    if (outline === fallback) console.error("outline fallback used. lastErr=", lastErr, "raw=", content.slice(0, 300));
 
     return new Response(JSON.stringify({ outline }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
