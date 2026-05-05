@@ -122,13 +122,18 @@ const Index = () => {
       }
 
       updateStep("docx", { status: "active", detail: "Typesetting cover, TOC, chapters…" });
-      const blob = await buildEbookDocx({ outline: out, cover: coverImg, chapters: builtChapters });
+      const titledCover = await composeCoverWithTitle(coverImg, out.title, out.subtitle, out.author_pen_name);
+      setCover(titledCover);
+      const blob = await buildEbookDocx({ outline: out, cover: titledCover, chapters: builtChapters });
       const safeName = out.title.replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "").toLowerCase() || "ebook";
+      const filename = `${safeName}.docx`;
       setDocxBlob(blob);
-      setDocxFilename(`${safeName}.docx`);
+      setDocxFilename(filename);
       updateStep("docx", { status: "done", detail: `${(blob.size / 1024).toFixed(0)} KB` });
       setPhase("done");
-      toast.success("Your eBook is ready!");
+      // Auto-download immediately
+      downloadBlob(blob, filename);
+      toast.success("Your eBook is ready! Download starting…");
     } catch (err: any) {
       console.error(err);
       const msg = err?.message || "Generation failed";
