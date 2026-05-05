@@ -165,6 +165,35 @@ function buildChapterParagraphs(ch: BuiltChapter): Paragraph[] {
     const line = raw.trim();
     if (!line) { flushPara(); flushList(); continue; }
 
+    // Embedded image token: [IMG|dataUrl|caption]
+    if (line.startsWith("[IMG|")) {
+      flushPara(); flushList();
+      const inner = line.slice(5, line.endsWith("]") ? -1 : undefined);
+      const sep = inner.indexOf("|");
+      const dataUrl = sep > 0 ? inner.slice(0, sep) : inner;
+      const caption = sep > 0 ? inner.slice(sep + 1) : "";
+      try {
+        paras.push(new Paragraph({
+          alignment: AlignmentType.CENTER,
+          spacing: { before: 200, after: 80 },
+          children: [new ImageRun({
+            type: imageType(dataUrl),
+            data: dataUrlToBytes(dataUrl),
+            transformation: { width: 480, height: 300 },
+            altText: { title: caption || "illustration", description: caption || "illustration", name: "illustration" },
+          } as any)],
+        }));
+        if (caption) {
+          paras.push(new Paragraph({
+            alignment: AlignmentType.CENTER,
+            spacing: { after: 240 },
+            children: [new TextRun({ text: caption, italics: true, size: 18, color: "666666" })],
+          }));
+        }
+      } catch (e) { console.warn("inline image embed failed", e); }
+      continue;
+    }
+
     const tagged = parseTaggedBlock(line);
     if (tagged) {
       flushPara(); flushList();
