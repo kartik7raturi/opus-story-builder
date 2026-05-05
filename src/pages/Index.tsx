@@ -105,7 +105,13 @@ const Index = () => {
             style: isColoring ? "line-art" : "color",
           }).catch((err) => { console.warn("Chapter image failed", err); return undefined; }));
         }
-        const [content, image] = await Promise.all(tasks);
+        const [rawContent, image] = await Promise.all(tasks);
+        updateStep(`ch-${chapter.number}`, { detail: "Rendering visuals & charts…" });
+        const content = await enrichChapterContent(rawContent as string, {
+          emotion: out.emotion,
+          quality: v.hqImages ? "pro" : "fast",
+          coloring: isColoring,
+        });
         builtChapters.push({
           plan: { number: chapter.number, title: chapter.title },
           content,
