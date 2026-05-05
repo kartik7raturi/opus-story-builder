@@ -6,6 +6,7 @@ import { ProgressTimeline, type Step } from "@/components/ProgressTimeline";
 import { ResultView } from "@/components/ResultView";
 import { generateOutline, generateChapter, generateImage, type Outline } from "@/lib/ebook-api";
 import { buildEbookDocx, downloadBlob, downloadDataUrl, type BuiltChapter } from "@/lib/docx-builder";
+import { enrichChapterContent } from "@/lib/media-enrich";
 
 type Phase = "idle" | "generating" | "done" | "error";
 
