@@ -296,6 +296,33 @@ export async function buildEbookDocx(payload: EbookPayload): Promise<Blob> {
     `First digital edition, ${year}.`,
   ]) sectionChildren.push(new Paragraph({ spacing: { after: 160 }, children: [new TextRun({ text: t })] }));
 
+  // Disclaimer
+  sectionChildren.push(new Paragraph({ children: [new PageBreak()] }));
+  sectionChildren.push(new Paragraph({
+    heading: HeadingLevel.HEADING_2,
+    children: [new TextRun({ text: "Disclaimer", bold: true })],
+  }));
+  for (const t of [
+    `The information provided in this book is for general informational and educational purposes only. The author and publisher have made every effort to ensure accuracy at the time of publication.`,
+    `This book is not intended to substitute for professional advice — medical, legal, financial, psychological, or otherwise. Readers should consult qualified professionals before acting on any information contained herein.`,
+    `The author and publisher disclaim any liability for losses, damages, or adverse outcomes arising directly or indirectly from the use or application of any content in this book.`,
+    `Any references to third parties, brands, or external resources are for illustrative purposes only and do not constitute endorsement.`,
+  ]) sectionChildren.push(new Paragraph({ spacing: { after: 160, line: 320 }, children: [new TextRun({ text: t })] }));
+
+  // Privacy Policy
+  sectionChildren.push(new Paragraph({ children: [new PageBreak()] }));
+  sectionChildren.push(new Paragraph({
+    heading: HeadingLevel.HEADING_2,
+    children: [new TextRun({ text: "Privacy Policy", bold: true })],
+  }));
+  for (const t of [
+    `We respect your privacy. This eBook itself does not collect personal data. If you choose to contact the author or engage with linked services mentioned within these pages, those interactions are governed by their own respective privacy policies.`,
+    `Any personal information you voluntarily share — for example through email, newsletter signup, or feedback — will be used solely to respond to your request and improve future editions. It will never be sold, rented, or shared with unauthorized third parties.`,
+    `You may request access to, correction of, or deletion of any personal data the author holds about you at any time by reaching out through the contact channels provided.`,
+    `By reading and using this book, you acknowledge and accept this privacy policy.`,
+  ]) sectionChildren.push(new Paragraph({ spacing: { after: 160, line: 320 }, children: [new TextRun({ text: t })] }));
+
+
   // About
   sectionChildren.push(new Paragraph({ children: [new PageBreak()] }));
   sectionChildren.push(new Paragraph({
