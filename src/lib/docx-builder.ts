@@ -13,8 +13,8 @@ export type BuiltChapter = {
 
 export type EbookPayload = {
   outline: Outline;
-  cover: string;
   chapters: BuiltChapter[];
+  plan?: { thinking?: string; theme?: string; tone?: string };
 };
 
 // ---- helpers ----
@@ -243,27 +243,11 @@ function buildChapterParagraphs(ch: BuiltChapter): Paragraph[] {
 
 // ---- main ----
 export async function buildEbookDocx(payload: EbookPayload): Promise<Blob> {
-  const { outline, cover, chapters } = payload;
+  const { outline, chapters } = payload;
 
   const sectionChildren: Paragraph[] = [];
 
-  // Cover (full image)
-  if (cover) {
-    try {
-      sectionChildren.push(new Paragraph({
-        alignment: AlignmentType.CENTER,
-        children: [new ImageRun({
-          type: imageType(cover),
-          data: dataUrlToBytes(cover),
-          transformation: { width: 480, height: 720 },
-          altText: { title: outline.title, description: outline.title, name: outline.title },
-        } as any)],
-      }));
-    } catch (e) { console.warn("cover embed failed", e); }
-  }
-
-  // Title page
-  sectionChildren.push(new Paragraph({ children: [new PageBreak()] }));
+  // Title page (typeset only — no cover image)
   sectionChildren.push(new Paragraph({
     alignment: AlignmentType.CENTER,
     spacing: { before: 1200, after: 240 },
