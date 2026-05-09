@@ -4,10 +4,13 @@ import { BookMarked, Sparkles, Wand2, Layers, Palette, FileText } from "lucide-r
 import { GeneratorForm, type GeneratorFormValues } from "@/components/GeneratorForm";
 import { ProgressTimeline, type Step } from "@/components/ProgressTimeline";
 import { ResultView } from "@/components/ResultView";
-import { generateOutline, generateChapter, generateImage, type Outline } from "@/lib/ebook-api";
-import { buildEbookDocx, downloadBlob, downloadDataUrl, type BuiltChapter } from "@/lib/docx-builder";
+import {
+  planEbook, generateOutline, generateChapter, generateImage,
+  ruleFor, type Outline, type EbookPlan,
+} from "@/lib/ebook-api";
+import { buildEbookDocx, downloadBlob, type BuiltChapter } from "@/lib/docx-builder";
 import { enrichChapterContent } from "@/lib/media-enrich";
-import { composeCoverWithTitle } from "@/lib/cover-compose";
+import { getStockPhoto } from "@/lib/stock-photos";
 
 type Phase = "idle" | "generating" | "done" | "error";
 
@@ -15,13 +18,13 @@ const Index = () => {
   const [phase, setPhase] = useState<Phase>("idle");
   const [steps, setSteps] = useState<Step[]>([]);
   const [outline, setOutline] = useState<Outline | null>(null);
-  const [cover, setCover] = useState<string>("");
+  const [plan, setPlan] = useState<EbookPlan | null>(null);
   const [docxBlob, setDocxBlob] = useState<Blob | null>(null);
   const [docxFilename, setDocxFilename] = useState("ebook.docx");
 
   useEffect(() => {
     document.title = "Inkwell — AI eBook Generator";
-    const desc = "Generate full, beautifully designed eBooks with AI: title, chapters, illustrations, cover & policy pages — downloadable as PDF.";
+    const desc = "Generate full, beautifully designed eBooks with AI: planning, chapters, illustrations, copyright pages — downloadable as .docx.";
     let m = document.querySelector('meta[name="description"]');
     if (!m) { m = document.createElement("meta"); m.setAttribute("name", "description"); document.head.appendChild(m); }
     m.setAttribute("content", desc);
@@ -35,13 +38,13 @@ const Index = () => {
 
   const handleGenerate = async (v: GeneratorFormValues) => {
     setPhase("generating");
-    setOutline(null);
-    setCover("");
-    setDocxBlob(null);
+    setOutline(null); setPlan(null); setDocxBlob(null);
+
+    const rule = ruleFor(v.ebookType);
 
     const initial: Step[] = [
-      { id: "outline", label: "Designing the book outline", status: "active", detail: "AI auto-deriving characters, emotion, tone, tags…" },
-      { id: "cover", label: "Painting the cover", status: "pending" },
+      { id: "plan",    label: "AI thinking & planning", status: "active", detail: "Reasoning about audience, tone & theme…" },
+      { id: "outline", label: "Designing the book outline", status: "pending" },
       ...Array.from({ length: v.chapters }, (_, i) => ({
         id: `ch-${i + 1}`, label: `Writing chapter ${i + 1}`, status: "pending" as const,
       })),
@@ -49,17 +52,21 @@ const Index = () => {
     ];
     setSteps(initial);
 
-    const isColoring = v.ebookType === "coloring";
-
     try {
+      // 1. PLAN
+      const ageGroup = v.ageGroup === "auto" ? undefined : v.ageGroup;
+      const p = await planEbook({ title: v.title, ebookType: v.ebookType, notes: v.notes, ageGroup });
+      setPlan(p);
+      updateStep("plan", { status: "done", detail: `${p.audience} · ${p.tone}` });
+
+      // 2. OUTLINE
+      updateStep("outline", { status: "active" });
       const out = await generateOutline({
-        title: v.title,
-        ebookType: v.ebookType,
-        notes: v.notes,
-        chapters: v.chapters,
+        title: v.title, ebookType: v.ebookType, notes: v.notes,
+        chapters: v.chapters, ageGroup: p.ageGroup, plan: p,
       });
       setOutline(out);
-      updateStep("outline", { status: "done", detail: `${out.chapters.length} chapters · ${out.tags?.length || 0} tags · ${out.emotion || ""}` });
+      updateStep("outline", { status: "done", detail: `${out.chapters.length} chapters · ${out.tags?.length || 0} tags` });
 
       setSteps((prev) => {
         const fixed = prev.filter((s) => !s.id.startsWith("ch-"));
@@ -70,69 +77,59 @@ const Index = () => {
         return [...fixed.slice(0, before), ...chSteps, ...fixed.slice(before)];
       });
 
-      updateStep("cover", { status: "active", detail: v.hqImages ? "HQ Flux model · ~60s" : "Fast model" });
-      const coverImg = await generateImage({
-        prompt: out.cover_prompt,
-        kind: "cover",
-        emotion: out.emotion,
-        quality: v.hqImages ? "pro" : "fast",
-      });
-      setCover(coverImg);
-      updateStep("cover", { status: "done" });
-
+      // 3. CHAPTERS
       const builtChapters: BuiltChapter[] = [];
       let prevSummary = "";
       for (const chapter of out.chapters) {
         updateStep(`ch-${chapter.number}`, { status: "active" });
         const tasks: Promise<any>[] = [
           generateChapter({
-            bookTitle: out.title,
-            ebookType: v.ebookType,
-            emotion: out.emotion,
-            tone: out.tone,
-            audience: out.audience,
-            characters: out.characters,
-            chapter,
-            prevSummary,
-            wordsTarget: v.wordsPerChapter,
+            bookTitle: out.title, ebookType: v.ebookType,
+            emotion: out.emotion, tone: out.tone, audience: out.audience,
+            ageGroup: out.ageGroup, characters: out.characters,
+            chapter, prevSummary, wordsTarget: v.wordsPerChapter,
           }),
         ];
-        if (v.imagesPerChapter) {
-          tasks.push(generateImage({
-            prompt: chapter.image_prompt,
-            kind: "chapter",
-            emotion: out.emotion,
-            quality: v.hqImages ? "pro" : "fast",
-            style: isColoring ? "line-art" : "color",
-          }).catch((err) => { console.warn("Chapter image failed", err); return undefined; }));
+        if (v.imagesPerChapter && rule.needsImages) {
+          // Route image source per type
+          if (rule.useStockPhotos) {
+            tasks.push(getStockPhoto(chapter.image_prompt || chapter.title, 1280, 800)
+              .then((p) => p || undefined)
+              .catch(() => undefined));
+          } else {
+            tasks.push(generateImage({
+              prompt: chapter.image_prompt, kind: "chapter",
+              emotion: out.emotion, quality: v.hqImages ? "pro" : "fast",
+              style: rule.imageStyle === "line-art" ? "line-art" : "color",
+            }).catch((err) => { console.warn("Chapter image failed", err); return undefined; }));
+          }
         }
         const [rawContent, image] = await Promise.all(tasks);
-        updateStep(`ch-${chapter.number}`, { detail: "Rendering visuals & charts…" });
+        updateStep(`ch-${chapter.number}`, { detail: "Rendering visuals…" });
         const content = await enrichChapterContent(rawContent as string, {
-          emotion: out.emotion,
+          ebookType: v.ebookType, emotion: out.emotion,
           quality: v.hqImages ? "pro" : "fast",
-          coloring: isColoring,
         });
         builtChapters.push({
           plan: { number: chapter.number, title: chapter.title },
-          content,
-          image,
+          content, image,
         });
         prevSummary = chapter.summary;
-        updateStep(`ch-${chapter.number}`, { status: "done", detail: `${(content as string).split(/\s+/).length.toLocaleString()} words` });
+        updateStep(`ch-${chapter.number}`, {
+          status: "done",
+          detail: `${(content as string).split(/\s+/).length.toLocaleString()} words`,
+        });
       }
 
-      updateStep("docx", { status: "active", detail: "Typesetting cover, TOC, chapters…" });
-      const titledCover = await composeCoverWithTitle(coverImg, out.title, out.subtitle, out.author_pen_name);
-      setCover(titledCover);
-      const blob = await buildEbookDocx({ outline: out, cover: titledCover, chapters: builtChapters });
+      // 4. DOCX
+      updateStep("docx", { status: "active", detail: "Typesetting…" });
+      const blob = await buildEbookDocx({ outline: out, chapters: builtChapters, plan: p });
       const safeName = out.title.replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "").toLowerCase() || "ebook";
       const filename = `${safeName}.docx`;
       setDocxBlob(blob);
       setDocxFilename(filename);
       updateStep("docx", { status: "done", detail: `${(blob.size / 1024).toFixed(0)} KB` });
       setPhase("done");
-      // Auto-download immediately
       downloadBlob(blob, filename);
       toast.success("Your eBook is ready! Download starting…");
     } catch (err: any) {
@@ -145,23 +142,18 @@ const Index = () => {
   };
 
   const reset = () => {
-    setPhase("idle");
-    setOutline(null);
-    setCover("");
-    setDocxBlob(null);
-    setSteps([]);
+    setPhase("idle"); setOutline(null); setPlan(null); setDocxBlob(null); setSteps([]);
   };
 
   const features = useMemo(() => ([
-    { icon: Layers, title: "Full structure", text: "Outline, chapters, TOC, copyright, disclaimer & license pages." },
-    { icon: Palette, title: "Cinematic art", text: "AI-painted cover and one illustration per chapter." },
-    { icon: Sparkles, title: "Emotion-aware", text: "Pick the mood — every word and image follows it." },
-    { icon: FileText, title: "Print-ready PDF", text: "Editorial 6×9 layout, page numbers, running headers." },
+    { icon: Layers, title: "Full structure", text: "Title page, TOC, copyright, disclaimer & policy pages." },
+    { icon: Palette, title: "Smart visuals", text: "AI art, line-art, or copyright-free stock photos per type." },
+    { icon: Sparkles, title: "AI thinking", text: "A planning step before writing — visible to you." },
+    { icon: FileText, title: "Age-aware", text: "Strict tone & safety rules for kids, teens, and adults." },
   ]), []);
 
   return (
     <div className="min-h-screen bg-background">
-      {/* Hero */}
       <header className="relative overflow-hidden bg-hero grain">
         <nav className="relative z-10 mx-auto flex max-w-6xl items-center justify-between px-6 py-6">
           <div className="flex items-center gap-2">
@@ -179,37 +171,35 @@ const Index = () => {
 
         <div className="relative z-10 mx-auto max-w-6xl px-6 pb-24 pt-12 md:pt-20 md:pb-32 text-center">
           <div className="inline-flex items-center gap-2 rounded-full border border-primary/20 bg-card/60 px-4 py-1.5 text-xs font-semibold uppercase tracking-[0.18em] text-primary backdrop-blur">
-            <Sparkles className="h-3 w-3" /> Powered by Gemini 3 Pro
+            <Sparkles className="h-3 w-3" /> Powered by Google Gemini · Free
           </div>
           <h1 className="mt-6 font-display text-5xl md:text-7xl font-bold leading-[1.05] tracking-tight text-balance">
             Type a title.<br />
             <span className="italic text-primary">Receive a whole book.</span>
           </h1>
           <p className="mx-auto mt-6 max-w-2xl text-lg md:text-xl text-muted-foreground text-balance">
-            Inkwell generates a complete, beautifully designed eBook — chapters, illustrations,
-            cover art, copyright & policy pages — and hands you a print-ready PDF in minutes.
+            Inkwell plans, writes, and illustrates a complete eBook — coloring books, novels,
+            cookbooks, kids' stories, quizzes & more — and hands you a polished .docx.
           </p>
           <div className="mt-10 flex flex-wrap justify-center gap-3 text-sm text-muted-foreground">
-            <span className="rounded-full border bg-card px-3 py-1">📖 8–20 chapters</span>
-            <span className="rounded-full border bg-card px-3 py-1">🎨 AI cover + illustrations</span>
-            <span className="rounded-full border bg-card px-3 py-1">📄 Editorial PDF</span>
-            <span className="rounded-full border bg-card px-3 py-1">🏷️ Tags & policies</span>
+            <span className="rounded-full border bg-card px-3 py-1">🧠 AI planning step</span>
+            <span className="rounded-full border bg-card px-3 py-1">🎨 Smart visuals</span>
+            <span className="rounded-full border bg-card px-3 py-1">📄 Editorial .docx</span>
+            <span className="rounded-full border bg-card px-3 py-1">👶 Age-safe</span>
           </div>
         </div>
 
-        {/* Decorative floating books */}
         <div className="pointer-events-none absolute -left-10 top-32 hidden h-40 w-28 rotate-[-12deg] rounded-sm bg-ink shadow-book md:block animate-float-slow" />
         <div className="pointer-events-none absolute -right-6 top-48 hidden h-48 w-32 rotate-[8deg] rounded-sm bg-gold shadow-book md:block animate-float-slow" style={{ animationDelay: "1.5s" }} />
       </header>
 
-      {/* Generator */}
       <main id="generator" className="mx-auto max-w-6xl px-6 -mt-10 pb-24">
         <section className="rounded-lg border bg-card shadow-book p-6 md:p-10">
           {phase === "idle" || phase === "error" ? (
             <>
               <div className="mb-8 max-w-2xl">
                 <h2 className="font-display text-3xl md:text-4xl font-bold">Compose your book</h2>
-                <p className="mt-2 text-muted-foreground">Fill in the details. We'll handle title polish, structure, voice, and visuals.</p>
+                <p className="mt-2 text-muted-foreground">Title + type. AI plans it, writes it, illustrates it, exports a .docx.</p>
               </div>
               <GeneratorForm onSubmit={handleGenerate} isGenerating={false} />
             </>
@@ -218,7 +208,7 @@ const Index = () => {
               <div>
                 <div className="text-xs font-semibold uppercase tracking-[0.2em] text-primary mb-2">In progress</div>
                 <h2 className="font-display text-3xl md:text-4xl font-bold leading-tight text-balance">
-                  {outline?.title || "Designing your book…"}
+                  {outline?.title || "Planning your book…"}
                 </h2>
                 {outline?.subtitle && (
                   <p className="font-display italic text-lg text-muted-foreground mt-2">{outline.subtitle}</p>
@@ -227,12 +217,12 @@ const Index = () => {
                   <div className="h-full w-1/2 animate-shimmer" />
                 </div>
                 <p className="mt-3 text-sm text-muted-foreground">
-                  Generation usually takes 1–3 minutes depending on chapter count and image quality.
-                  Please keep this tab open.
+                  Generation usually takes 1–4 minutes. Please keep this tab open.
                 </p>
-                {cover && (
-                  <div className="mt-8 max-w-[260px]">
-                    <img src={cover} alt="Generated cover" className="w-full rounded-sm shadow-book animate-float-slow" />
+                {plan?.thinking && (
+                  <div className="mt-6 rounded-md border bg-background p-4">
+                    <div className="text-xs font-semibold uppercase tracking-wider text-primary mb-2">AI Thinking</div>
+                    <p className="text-sm text-muted-foreground whitespace-pre-line leading-relaxed">{plan.thinking}</p>
                   </div>
                 )}
               </div>
@@ -243,23 +233,21 @@ const Index = () => {
                 </div>
               </div>
             </div>
-          ) : outline && cover ? (
+          ) : outline ? (
             <ResultView
               outline={outline}
-              cover={cover}
+              plan={plan}
               docxBlob={docxBlob}
               onDownloadDocx={() => docxBlob && downloadBlob(docxBlob, docxFilename)}
-              onDownloadCover={() => downloadDataUrl(cover, docxFilename.replace(/\.docx$/, "-cover.png"))}
               onReset={reset}
             />
           ) : null}
         </section>
 
-        {/* Features */}
         <section id="features" className="mt-20">
           <div className="text-center max-w-2xl mx-auto">
             <h2 className="font-display text-3xl md:text-4xl font-bold">Everything a real book needs</h2>
-            <p className="mt-3 text-muted-foreground">No half-baked drafts. Inkwell ships finished eBooks with all the trimmings.</p>
+            <p className="mt-3 text-muted-foreground">Every type gets the right composition — coloring books get only line-art, fiction gets full stories, self-help gets real photos.</p>
           </div>
           <div className="mt-10 grid gap-5 md:grid-cols-2 lg:grid-cols-4">
             {features.map((f) => (
@@ -274,12 +262,11 @@ const Index = () => {
           </div>
         </section>
 
-        {/* How it works */}
         <section id="how" className="mt-20 grid gap-10 md:grid-cols-3">
           {[
-            { n: "01", t: "Describe", d: "Title, emotion, tone, audience, length. The more specific, the better." },
-            { n: "02", t: "Generate", d: "We design the outline, write each chapter, paint cover and illustrations." },
-            { n: "03", t: "Download", d: "Receive a typeset PDF and high-res cover. Yours to publish, share, or sell." },
+            { n: "01", t: "Describe", d: "Title, type, age group. The more specific, the better." },
+            { n: "02", t: "AI Plans & Writes", d: "Gemini plans, then writes each chapter and routes the right visuals." },
+            { n: "03", t: "Download", d: "Receive a typeset .docx — open in Word, Google Docs, KDP." },
           ].map((s) => (
             <div key={s.n}>
               <div className="font-display text-6xl font-bold text-primary/20">{s.n}</div>
