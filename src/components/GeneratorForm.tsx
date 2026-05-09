@@ -49,6 +49,22 @@ const AGES: { value: AgeGroup | "auto"; label: string }[] = [
   { value: "adult",      label: "Adult" },
 ];
 
+const TYPE_PRESETS: Record<EbookType, { chapters: number; wordsPerChapter: number; imagesPerChapter: boolean; ageGroup?: AgeGroup }> = {
+  standard: { chapters: 9, wordsPerChapter: 1500, imagesPerChapter: true },
+  self_help: { chapters: 10, wordsPerChapter: 1400, imagesPerChapter: true },
+  fiction: { chapters: 12, wordsPerChapter: 1800, imagesPerChapter: true },
+  biography: { chapters: 10, wordsPerChapter: 1600, imagesPerChapter: true },
+  technical: { chapters: 10, wordsPerChapter: 1300, imagesPerChapter: true },
+  workbook: { chapters: 10, wordsPerChapter: 1000, imagesPerChapter: true },
+  journal: { chapters: 30, wordsPerChapter: 500, imagesPerChapter: false },
+  cookbook: { chapters: 12, wordsPerChapter: 900, imagesPerChapter: true },
+  kids: { chapters: 8, wordsPerChapter: 700, imagesPerChapter: true, ageGroup: "kids-4-7" },
+  coloring: { chapters: 20, wordsPerChapter: 300, imagesPerChapter: true, ageGroup: "kids-4-7" },
+  game: { chapters: 14, wordsPerChapter: 600, imagesPerChapter: true, ageGroup: "kids-8-12" },
+  quiz: { chapters: 12, wordsPerChapter: 550, imagesPerChapter: false, ageGroup: "teen" },
+  comic: { chapters: 10, wordsPerChapter: 700, imagesPerChapter: true, ageGroup: "teen" },
+};
+
 interface Props {
   onSubmit: (v: GeneratorFormValues) => void;
   isGenerating: boolean;
@@ -63,6 +79,18 @@ export function GeneratorForm({ onSubmit, isGenerating }: Props) {
   });
   const set = <K extends keyof GeneratorFormValues>(k: K, val: GeneratorFormValues[K]) =>
     setV((s) => ({ ...s, [k]: val }));
+  const applyTypePreset = (ebookType: EbookType) => {
+    const preset = TYPE_PRESETS[ebookType];
+    setV((s) => ({
+      ...s,
+      ebookType,
+      chapters: preset.chapters,
+      wordsPerChapter: preset.wordsPerChapter,
+      imagesPerChapter: preset.imagesPerChapter,
+      hqImages: preset.imagesPerChapter ? s.hqImages : false,
+      ageGroup: s.ageGroup === "auto" && preset.ageGroup ? preset.ageGroup : s.ageGroup,
+    }));
+  };
 
   return (
     <form onSubmit={(e) => { e.preventDefault(); if (v.title.trim()) onSubmit(v); }} className="space-y-6">
@@ -78,7 +106,7 @@ export function GeneratorForm({ onSubmit, isGenerating }: Props) {
       <div className="grid gap-4 md:grid-cols-2">
         <div className="space-y-2">
           <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">eBook Type</Label>
-          <Select value={v.ebookType} onValueChange={(x) => set("ebookType", x as EbookType)}>
+          <Select value={v.ebookType} onValueChange={(x) => applyTypePreset(x as EbookType)}>
             <SelectTrigger className="h-12"><SelectValue /></SelectTrigger>
             <SelectContent>
               {TYPES.map((t) => (
@@ -109,7 +137,7 @@ export function GeneratorForm({ onSubmit, isGenerating }: Props) {
             <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Chapters</Label>
             <span className="font-display text-2xl text-primary">{v.chapters}</span>
           </div>
-          <Slider min={3} max={20} step={1} value={[v.chapters]} onValueChange={([n]) => set("chapters", n)} />
+          <Slider min={3} max={30} step={1} value={[v.chapters]} onValueChange={([n]) => set("chapters", n)} />
         </div>
         <div className="space-y-3 rounded-md border bg-card p-4">
           <div className="flex items-center justify-between">
@@ -141,7 +169,7 @@ export function GeneratorForm({ onSubmit, isGenerating }: Props) {
             <div className="font-semibold flex items-center gap-2">HQ image model <Sparkles className="h-3.5 w-3.5 text-accent" /></div>
             <div className="text-xs text-muted-foreground">Slower, richer (free Flux). Off = fast.</div>
           </div>
-          <Switch checked={v.hqImages} onCheckedChange={(c) => set("hqImages", c)} />
+          <Switch checked={v.hqImages} disabled={!v.imagesPerChapter} onCheckedChange={(c) => set("hqImages", c)} />
         </label>
       </div>
 
