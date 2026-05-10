@@ -1,10 +1,57 @@
-// Shared Lovable AI Gateway helper. Free Google Gemini for text.
+// Free open-source AI helper using Pollinations.ai — no API key, no credits required.
+// Pollinations exposes an OpenAI-compatible endpoint backed by free open models
+// (Mistral, Llama, OpenAI community endpoints).
 export const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-const GATEWAY = "https://ai.gateway.lovable.dev/v1/chat/completions";
+const POLLINATIONS_URL = "https://text.pollinations.ai/openai";
+
+// Free models served by Pollinations. Tried in order; fall back if one is busy.
+const FREE_MODELS = ["openai", "mistral", "llama", "openai-large"];
+
+async function callPollinations(model: string, args: {
+  system: string;
+  user: string;
+  json?: boolean;
+  temperature?: number;
+}): Promise<string> {
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), 90000);
+  try {
+    const resp = await fetch(POLLINATIONS_URL, {
+      method: "POST",
+      signal: ctrl.signal,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model,
+        messages: [
+          { role: "system", content: args.system + (args.json ? "\n\nReturn ONLY valid JSON. No prose, no markdown fences." : "") },
+          { role: "user", content: args.user },
+        ],
+        temperature: args.temperature ?? 0.85,
+        seed: Math.floor(Math.random() * 1_000_000),
+        private: true,
+        ...(args.json ? { response_format: { type: "json_object" } } : {}),
+      }),
+    });
+    if (!resp.ok) throw new Error(`status ${resp.status}`);
+    const text = await resp.text();
+    // Pollinations may return either OpenAI-style JSON or plain text.
+    try {
+      const data = JSON.parse(text);
+      const content = data?.choices?.[0]?.message?.content;
+      if (typeof content === "string" && content.trim().length > 20) return content;
+      if (typeof data === "string" && data.trim().length > 20) return data;
+    } catch {
+      if (text && text.trim().length > 20) return text;
+    }
+    throw new Error("empty content");
+  } finally {
+    clearTimeout(t);
+  }
+}
 
 export async function lovableChat(args: {
   system: string;
@@ -12,54 +59,16 @@ export async function lovableChat(args: {
   json?: boolean;
   temperature?: number;
 }): Promise<string> {
-  const key = Deno.env.get("LOVABLE_API_KEY");
-  if (!key) throw new Error("LOVABLE_API_KEY missing");
-
-  const models = [
-    "google/gemini-2.5-flash",
-    "google/gemini-2.5-flash-lite",
-  ];
-
   let lastErr = "";
-  for (const model of models) {
-    const ctrl = new AbortController();
-    const t = setTimeout(() => ctrl.abort(), 60000);
+  for (const model of FREE_MODELS) {
     try {
-      const resp = await fetch(GATEWAY, {
-        method: "POST",
-        signal: ctrl.signal,
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${key}`,
-        },
-        body: JSON.stringify({
-          model,
-          messages: [
-            { role: "system", content: args.system },
-            { role: "user", content: args.user },
-          ],
-          temperature: args.temperature ?? 0.85,
-          ...(args.json ? { response_format: { type: "json_object" } } : {}),
-        }),
-      });
-      if (resp.ok) {
-        const data = await resp.json();
-        const content = data?.choices?.[0]?.message?.content ?? "";
-        if (content && String(content).trim().length > 30) return content;
-        lastErr = "empty content";
-      } else {
-        lastErr = `status ${resp.status}`;
-        if (resp.status === 429) lastErr = "Rate limit — please retry in a moment.";
-        if (resp.status === 402) lastErr = "AI credits exhausted. Add credits in Workspace settings.";
-        await resp.text().catch(() => "");
-      }
+      return await callPollinations(model, args);
     } catch (e) {
       lastErr = e instanceof Error ? e.message : String(e);
-    } finally {
-      clearTimeout(t);
+      console.warn(`pollinations model ${model} failed: ${lastErr}`);
     }
   }
-  throw new Error(`AI gateway failed: ${lastErr}`);
+  throw new Error(`Free AI provider failed: ${lastErr}`);
 }
 
 // Type rules govern what each ebook type contains.
